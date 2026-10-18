@@ -1,0 +1,9 @@
+.streamlit/secrets.toml
+membership.xlsx
+.agents/
+.claude/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/

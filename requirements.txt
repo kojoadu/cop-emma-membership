@@ -1,0 +1,4 @@
+cryptography>=44,<47
+openpyxl>=3.1,<4
+streamlit>=1.40,<2
+supabase>=2.10,<3
