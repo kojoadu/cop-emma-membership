@@ -108,6 +108,85 @@ def _sign_in(url: str, anon_key: str, email: str, password: str) -> None:
         st.error("Sign-in failed. Check your email and password, then try again.")
 
 
+def _handle_invite_callback(url: str, anon_key: str) -> None:
+    token_hash = st.query_params.get("token_hash")
+    token_type = st.query_params.get("type")
+    if not token_hash and not token_type:
+        return
+    st.query_params.clear()
+    if not token_hash or token_type != "invite":
+        st.session_state["auth_error"] = (
+            "This invitation link is incomplete or invalid. Ask an administrator "
+            "to send a new invitation."
+        )
+        return
+
+    client = create_client(url, anon_key)
+    try:
+        response = client.auth.verify_otp(
+            {"token_hash": token_hash, "type": "invite"}
+        )
+        if response.session is None or response.user is None:
+            raise RuntimeError("Supabase did not return an invitation session.")
+    except Exception as exc:
+        LOGGER.warning(
+            "Supabase invitation verification failed (%s).", type(exc).__name__
+        )
+        st.session_state["auth_error"] = (
+            "This invitation link has expired or was already used. Ask an "
+            "administrator to send a new invitation."
+        )
+        return
+
+    st.session_state["access_token"] = response.session.access_token
+    st.session_state["refresh_token"] = response.session.refresh_token
+    st.session_state["user_id"] = str(response.user.id)
+    st.session_state["email"] = response.user.email or ""
+    st.session_state["password_setup_pending"] = True
+
+
+def _set_new_password(client: Client) -> None:
+    st.subheader("Set your password")
+    st.caption("Choose a password for your membership account.")
+    with st.form("set_new_password"):
+        password = st.text_input(
+            "New password", type="password", autocomplete="new-password"
+        )
+        confirm_password = st.text_input(
+            "Confirm new password", type="password", autocomplete="new-password"
+        )
+        submitted = st.form_submit_button("Set password", type="primary")
+    if not submitted:
+        return
+    if not password:
+        st.error("Enter a password.")
+        return
+    if password != confirm_password:
+        st.error("The passwords do not match.")
+        return
+    try:
+        response = client.auth.update_user({"password": password})
+        if response.user is None:
+            raise RuntimeError("Supabase did not confirm the password update.")
+    except Exception as exc:
+        LOGGER.warning("Supabase password setup failed (%s).", type(exc).__name__)
+        st.error(
+            "Your password could not be set. Check the password requirements and "
+            "try again."
+        )
+        return
+    try:
+        client.auth.sign_out()
+    except Exception as exc:
+        LOGGER.warning(
+            "Supabase sign-out after password setup failed (%s).", type(exc).__name__
+        )
+    _clear_login_state()
+    st.session_state.pop("password_setup_pending", None)
+    st.session_state["password_setup_complete"] = True
+    st.rerun()
+
+
 def _get_role(client: Client) -> str | None:
     response = (
         client.table("user_roles")
@@ -470,7 +549,24 @@ def main() -> None:
     st.title("COP EMMA MEMBERSHIP")
     st.caption("Private member directory")
     url, anon_key, encryption_key = _load_settings()
+    _handle_invite_callback(url, anon_key)
+    auth_error = st.session_state.pop("auth_error", None)
+    if auth_error:
+        st.error(auth_error)
+    if st.session_state.pop("password_setup_complete", False):
+        st.success("Your password has been set. Sign in with your new password.")
+
     client = _authenticated_client(url, anon_key)
+    if st.session_state.get("password_setup_pending"):
+        if client is None:
+            st.error(
+                "Your invitation session expired. Ask an administrator to resend "
+                "the invitation."
+            )
+            st.session_state.pop("password_setup_pending", None)
+            return
+        _set_new_password(client)
+        return
     if client is None:
         with st.form("sign_in"):
             email = st.text_input("Email", autocomplete="email")

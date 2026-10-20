@@ -12,7 +12,7 @@ The Excel workbook contains personal information. Keep the local `membership.xls
 
 ## Configure Supabase
 
-1. Create a Supabase project and configure Auth email/password sign-in, SMTP delivery, and allowed redirect URLs. Disable public sign-up; create or invite accounts only through Supabase Dashboard.
+1. Create a Supabase project and configure Auth email/password sign-in and SMTP delivery. In Supabase Dashboard → Authentication → URL Configuration, set **Site URL** to `https://cop-emma-membership.streamlit.app` and add that URL to **Redirect URLs**. Add `http://localhost:8501` to the allow list only if you also need local development; do not leave it as the Site URL for production. Dashboard invitations use this Auth URL configuration for their email redirect. If the invitation email still contains localhost, check that the Site URL and the invite email template do not specify a localhost redirect. Disable public sign-up; create or invite accounts only through Supabase Dashboard.
 2. In SQL Editor, apply [`supabase/schema.sql`](./supabase/schema.sql). Reapplying this idempotent schema after an app update adds any missing member-detail columns. It creates encrypted-record storage, roles, append-only audit history, row-level policies, and narrowly granted RPC functions.
 3. In Supabase Dashboard → Authentication → Users, create/invite the first administrator. Copy that Auth user's UUID and run the bootstrap `INSERT` at the bottom of `supabase/schema.sql`, replacing the example UUID. This is the only manual first-admin role assignment.
 4. Create `.streamlit/secrets.toml` from [`secrets.toml.example`](./secrets.toml.example), then fill in the project URL and public anon/publishable key:
@@ -67,7 +67,13 @@ The importer prompts for an admin email/password, encrypts records locally, and 
 - **Admin**: view/edit members and history; export or bulk-import member workbooks; assign `admin` or `editor` roles.
 - **Editor**: view/search/add/edit members and view history.
 
-An admin creates/invites an email/password account in Supabase Dashboard → Authentication → Users, then uses the app's Admin users tab to assign the new user's UUID a role. Public sign-up is not provided. Configure Supabase Auth email delivery and password policies before inviting users.
+An admin creates/invites an email/password account in Supabase Dashboard → Authentication → Users, then uses the app's Admin users tab to assign the new user's UUID a role. Public sign-up is not provided. To let invitees set a password in the app, update Supabase Dashboard → Authentication → Email Templates → **Invite user** so its invitation link points directly to the app with the one-time token hash:
+
+```html
+<a href="https://cop-emma-membership.streamlit.app/?token_hash={{ .TokenHash }}&type=invite">Accept invitation and set your password</a>
+```
+
+Keep the deployed app URL as the Supabase Site URL and allow it in Redirect URLs. The app verifies the invitation token and then prompts the invitee to choose a password that meets the project's Auth password policy. This direct link is needed because Streamlit cannot read Supabase tokens returned in a URL fragment. Resend any invitations sent before changing the template. Configure Supabase Auth email delivery and password policies before inviting users.
 The Admin users tab provides an export of every member record and accepts `.xlsx` uploads using the same blank leading column and 33 detail fields. Bulk imports append new records atomically, skip rows that exactly match existing data or an earlier row in that upload, and are limited to 1,000 new records per import. This lets admins reimport an exported workbook without duplicating its existing rows. Treat uploaded and exported workbooks as sensitive personal data and store them securely.
 
 ## Streamlit Community Cloud
